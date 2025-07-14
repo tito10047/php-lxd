@@ -2,6 +2,8 @@
 
 namespace Opensaucesystems\Lxd;
 
+use Http\Discovery\Psr17FactoryDiscovery;
+use Http\Discovery\Psr18ClientDiscovery;
 use Opensaucesystems\Lxd\Exception\InvalidEndpointException;
 use Opensaucesystems\Lxd\Exception\ClientConnectionException;
 use Opensaucesystems\Lxd\Exception\ServerException;
@@ -11,11 +13,8 @@ use Opensaucesystems\Lxd\HttpClient\Plugin\LxdExceptionThower;
 use Http\Client\Common\HttpMethodsClient;
 use Http\Client\Common\Plugin;
 use Http\Client\Common\PluginClient;
-use Http\Client\HttpClient;
-use Http\Discovery\HttpClientDiscovery;
-use Http\Discovery\MessageFactoryDiscovery;
-use Http\Discovery\UriFactoryDiscovery;
-use Http\Message\MessageFactory;
+use Psr\Http\Client\ClientInterface;
+use Psr\Http\Message\RequestFactoryInterface;
 
 class Client
 {
@@ -32,7 +31,7 @@ class Client
     /**
      * The object that sends HTTP messages
      *
-     * @var HttpClient
+     * @var ClientInterface
      */
     private $httpClient;
 
@@ -44,9 +43,9 @@ class Client
     private $pluginClient;
 
     /**
-     * @var MessageFactory
+     * @var RequestFactoryInterface
      */
-    private $messageFactory;
+    private $requestFactory;
 
     /**
      * @var Plugin[]
@@ -59,14 +58,19 @@ class Client
      * @var bool
      */
     private $httpClientModified = true;
+	/**
+	 * @var mixed|\Psr\Http\Message\StreamFactoryInterface
+	 */
+	private mixed $streamFactory;
 
-    /**
+	/**
      * Create a new lxd client Instance
      */
-    public function __construct(HttpClient $httpClient = null, $apiVersion = null, $url = null)
+    public function __construct(?ClientInterface $httpClient = null, $apiVersion = null, $url = null)
     {
-        $this->httpClient     = $httpClient ?: HttpClientDiscovery::find();
-        $this->messageFactory = MessageFactoryDiscovery::find();
+        $this->httpClient     = $httpClient ?: Psr18ClientDiscovery::find();
+        $this->requestFactory = Psr17FactoryDiscovery::findServerRequestFactory();
+		$this->streamFactory = Psr17FactoryDiscovery::findStreamFactory();
         $this->apiVersion     = $apiVersion ?: '1.0';
         $this->url            = $url ?: 'https://127.0.0.1:8443';
 
@@ -96,7 +100,7 @@ class Client
         $this->removePlugin(PathPrepend::class);
         $this->removePlugin(PathTrimEnd::class);
 
-        $this->addPlugin(new Plugin\AddHostPlugin(UriFactoryDiscovery::find()->createUri($this->url)));
+        $this->addPlugin(new Plugin\AddHostPlugin(Psr17FactoryDiscovery::findUriFactory()->createUri($this->url)));
         $this->addPlugin(new PathPrepend(sprintf('/%s', $this->getApiVersion())));
         $this->addPlugin(new PathTrimEnd());
     }
@@ -137,16 +141,17 @@ class Client
 
             $this->pluginClient = new HttpMethodsClient(
                 new PluginClient($this->httpClient, $this->plugins),
-                $this->messageFactory
+                $this->requestFactory,
+				$this->streamFactory
             );
         }
         return $this->pluginClient;
     }
 
     /**
-     * @param HttpClient $httpClient
+     * @param ClientInterface $httpClient
      */
-    public function setHttpClient(HttpClient $httpClient)
+    public function setHttpClient(ClientInterface $httpClient)
     {
         $this->httpClientModified = true;
         $this->httpClient = $httpClient;
